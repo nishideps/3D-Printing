@@ -1,6 +1,3 @@
-#' Nisha Depala, s2149899
-#' Add your own function definitions on this file.
-
 #' neg_log_lik
 #
 #' @description Evaluate the negated log-likelihood for model A and B
