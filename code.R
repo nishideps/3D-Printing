@@ -1,6 +1,3 @@
-#' Nisha, Depala
-#' Add your own function definitions on this file.
-
 #' Log-Exponential density
 #'
 #' Compute the density or log-density for a Log-Exponential (LogExp)
@@ -381,7 +378,7 @@ log_posterior_density <- function(theta, x, y, params) {
 
 posterior_mode <- function(theta_start, x, y, params) {
   
-  opt<- optim(theta_start, log_posterior_density, x = x, y = y, params = params, method = "BFGS", control = list(fnscale = -1), hessian = TRUE)
+  opt <- optim(theta_start, log_posterior_density, x = x, y = y, params = params, method = "BFGS", control = list(fnscale = -1), hessian = TRUE)
   
   parameters <- opt$par
   hessian <- opt$hessian
