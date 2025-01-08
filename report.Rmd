@@ -1,0 +1,316 @@
+---
+title: 'StatComp Project 1:  3D printer materials estimation'
+author: "Nisha Depala (s2149899)"
+output:
+  html_document:
+    number_sections: yes
+  pdf_document:
+    number_sections: yes
+header-includes:
+  - \newcommand{\bm}[1]{\boldsymbol{#1}}
+  - \newcommand{\mat}[1]{\begin{bmatrix}#1\end{bmatrix}}
+---
+```{r setup, include = FALSE}
+# Modify this setup code chunk to set options
+# or add extra packages etc if needed.
+# See the project instructions for more details
+# on what code to show, and where/how.
+load("filament1.rda")
+
+# Set default code chunk options
+knitr::opts_chunk$set(
+  echo = TRUE,
+  eval = TRUE
+)
+
+suppressPackageStartupMessages(library(tidyverse))
+suppressPackageStartupMessages(library(ggplot2))
+suppressPackageStartupMessages(library(styler))
+suppressPackageStartupMessages(library(mvtnorm))
+theme_set(theme_bw())
+
+# To give the same random number sequence every time the document is knit:ed,
+# making it easier to discuss the specific numbers in the text:
+set.seed(12345L)
+```
+
+```{r code=readLines("code.R"), eval=TRUE, echo=FALSE, include=FALSE}
+# Do not change this code chunk
+# Load function definitions
+source("code.R")
+```
+
+# The Data
+
+## Summary of the data set 
+
+A 3D printer uses rolls of filament that get heated and squeezed through a moving nozzle, gradually building objects. The objects are first designed in a CAD program that also estimates how much material will be required to print the object. Each object consists of only one colour.
+
+```{r table, echo = FALSE}
+num_black <- sum(filament1$Material == "Black")
+num_green <- sum(filament1$Material == "Green")
+num_magenta <- sum(filament1$Material == "Magenta")
+num_neonb <- sum(filament1$Material == "Neon blue")
+num_neonp <- sum(filament1$Material == "Neon pink")
+num_red <- sum(filament1$Material == "Red")
+
+num_points <- data.frame(
+  Material = c("Black", "Green", "Magenta", "Neon blue", "Neon pink", "Red"),
+  Occurences = c(num_black, num_green, num_magenta, num_neonb, num_neonp, num_red)
+)
+
+knitr::kable(num_points, caption =  "A table showing the number of data points for each material")
+```
+
+
+## Variability of CAD weight against different materials
+
+```{r scatter plot, echo=FALSE}
+colours <- c("black", "chartreuse4", "magenta", "cyan3", "deeppink2", "red")
+
+# Scatter plot comparing the CAD weight against the actual weight for each material
+ggplot(filament1,
+       aes(x = CAD_Weight,
+           y = Actual_Weight,
+           color = Material)) +
+  geom_point()+
+  facet_wrap(filament1$Material ~ .) +
+  scale_color_manual(values = colours) +
+  labs(x = "CAD Weight (grams)", 
+       y = "Actual Weight (grams)", 
+       title = "How CAD weight compares with actual weight for different materials") +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+Firstly, looking at our scatter plot, we can see the distribution of the object weight that the CAD software calculated against the actual weight of the object ordered by material. It is evident from the scatter plot that there is not an even distribution of objects printed per material. This makes it hard to assess data trends as there isn't enough data to make conclusive arguments. Magenta, neon blue and neon pink have 10 or fewer data points. These data points are also largely scattered which does not allow for spotting a trend. Looking at the data points for the rest of the objects, we can see that they all follow a linear relationship, the CAD weight is proportionate to the actual weight. 
+
+```{r scatter plot2, echo=FALSE}
+#get intercept and slope value 
+reg<-lm(formula = Actual_Weight ~ CAD_Weight, 
+   data=filament1) 
+coeff<-coefficients(reg)           
+intercept<-coeff[1] 
+slope<- coeff[2] 
+
+ggplot(filament1) +
+  geom_point(aes(x = CAD_Weight,
+           y = Actual_Weight,
+           color = Material)) +
+  geom_smooth(method = "lm", formula = y~x, aes(x = CAD_Weight, y = Actual_Weight), se = TRUE, color = "black", linewidth = 0.5) +
+  scale_color_manual(values = colours) +
+  labs(x = "CAD Weight (grams)", 
+       y = "Actual Weight (grams)", 
+       title = "How CAD weight compares with actual weight for different materials") +
+  theme_minimal()
+```
+
+Plotting all of the colours together, we can notice a trend. The line of best fit is given by $y = 1.079855x -0.1097023$. This implies that the relationship is roughly one-to-one between CAD weight and actual weight.
+
+```{r boxplot, echo = FALSE}
+# Box plot comparing the CAD weight for each material
+
+ggplot(filament1, 
+       aes(x = Material, 
+           y = CAD_Weight, 
+           color = Material)) +
+  geom_boxplot() +
+  scale_color_manual(values = colours) +
+  labs(x = "Material",
+       y = "CAD Weight (grams)",
+       title = "Variability of CAD Weight for different materials") +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+Now, to understand the variability in each material group, we can look at their box plots. The median CAD weight for black materials is smaller than the median for the green and red groups. It is also skewed towards the lower end of the IQR implying that the first 50% of the data is clustered together and as CAD weight increases, there are fewer objects. The green box plot has larger whiskers but a similar IQR to the black boxplot. This indicates that the data is spread wider across its top and bottom 25%. The red box plot has a large IQR and no outliers implying that the data is evenly spread over a wide range. 
+
+# Classical estimation
+
+We consider two linear models, A and B, to capture the relationship between CAD weight $(x_i)$ and actual weight $(y_i)$. The models are defined as \[ \text{Model A: } y_i \sim \text{Normal}[\beta_1 + \beta_2x_i, exp(\beta_3+\beta_4x_i)] \text{ and Model B: } y_i \sim \text{Normal}[\beta_1 + \beta_2x_i, exp(\beta_3)+(\beta_4)x_i^2]\]
+
+```{r table data, include = FALSE}
+fit_A <- filament1_estimate(filament1, "A")
+
+fit_B <- filament1_estimate(filament1, "B")
+```
+
+
+``` {r paramA, echo=FALSE}
+# Create table A
+A_par_tab <- rbind("Fit A" = fit_A)
+rownames(A_par_tab) <- c("β1", "β2", "β3", "β4")
+knitr::kable(A_par_tab, caption = "Model A Parameter Confidence Intervals")
+```
+
+The confidence intervals for $\beta_1$ and $\beta_2$ are relatively narrow, indicating a higher degree of certainty in the estimates of these parameters. $\beta_3$ and $\beta_4$ also have narrow confidence intervals albeit wider than those of $\beta_1$ and $\beta_2$. 
+
+As model A assumes an additive error term in the model; the narrow confidence intervals for $\beta_3$ and $\beta_4$ suggest a precise estimation of the additive error terms model A.
+
+```{r paramB, echo=FALSE}
+# Create table B
+B_par_tab <- rbind("Fit B" = fit_B)
+rownames(B_par_tab) <- c("β1", "β2", "β3", "β4")
+knitr::kable(B_par_tab, caption = "Model B Parameter Confidence Intervals")
+```
+
+Similar to model A, the confidence intervals for $\beta_1$ and $\beta_2$ are relatively narrow, indicating a higher degree of certainty in the estimates of these parameters. $\beta_3$ and $\beta_4$ are significantly wider compared to model A. This implies that we cannot say with great certainty that our estimated parameter is in fact correct. 
+
+Model B assumes a relative error term in the model, motivated by the assumption that fluctuations in material properties and room temperature lead to relative errors; the wider confidence intervals for $\beta_3$ and $\beta_4$ indicate greater uncertainty in estimating the parameters associated with the relative error term in Model B.
+
+In summary, while both models provide estimates for the relationship between CAD weight and actual weight, the wider confidence intervals in Model B suggest greater uncertainty in estimating parameters associated with the relative error term, which aligns with the physics-based assumption of the model. Model A, while mathematically convenient, may not fully capture the nature of the errors in the CAD software calculation according to the physics assumptions.
+
+# Bayesian estimation
+
+We now focus on a Bayesian model for describing the actual weight $(y_i)$ based on the CAD weight $(x_i)$ for observation $i$:
+\[y_i \sim \text{Normal} [\beta_1+\beta_2x_i,\beta_3+\beta_4x_i^2].\]
+
+To ensure the positivity of the variance, the parametrisation $\boldsymbol{\theta} = [\theta_1,\theta_2,\theta_3,\theta_4]=[\beta_1,\beta_2,\log(\beta_3),\log(\beta_4)]$ is introduced, and the printer operator assigns independent prior distributions as follows:
+\begin{align}
+  \theta_1 &\sim \text{Normal}(0,\gamma_1) \\
+  \theta_2 &\sim \text{Normal}(1,\gamma_2) \\
+  \theta_3 &\sim \text{LogExp}(\gamma_3) \\
+  \theta_4 &\sim \text{LogExp}(\gamma_4) 
+\end{align}
+where \textbf{LogExp($a$)} denotes the logarithm of an exponentially distributed random variable with rate parameter $a$.
+
+## Prior density
+The function `log_prior_density()` calculates the logarithm of the joint prior density $p(\boldsymbol{\theta})$ for the four $\theta_i$ parameters. It calculates the priors for each parameter and then returns the sum of them.
+
+## Observation likelihood
+The function `log_like()` returns the log-likelihood for the model defined above. It takes a parameter vector $\boldsymbol{\theta}$, predictor values $(\mathbf{x})$ and observed response values $(\mathbf{y})$. The function calculates the log-likelihood by summing the logarithms of the normal PDF evaluated at each observed response value. It allows for the evaluation of the goodness of fit of a statistical model and observed data.
+
+## Posterior density
+The function`log_posterior_density()` calculates the logarithm of the posterior density $p(\boldsymbol{\theta}|\mathbf{y})$ for the Bayesian model detailed above. The posterior density is directly proportional to the likelihood function multiplied by the the prior for the parameters. As we have already defined functions that calculate the logarithm of the prior and the likelihood, we can evaluate the posterior density by summing them. This correct up to some unevaluated normalisation constant.
+
+## Posterior mode
+The function `posterior_mode()` optimises the log posterior density to find the mode; this represents the most probable values of the parameters given the observed data and prior information and provides an insight into the curvature of the log posterior density through the Hessian. In our case, this is all in reference to our dataset containing information about the 3D printer using rolls of filament. 
+
+## Gaussian approximation
+
+We can use `posterior_mode()` to evaluate the inverse of the negated Hessian at the mode, in order to obtain a multivariate Normal approximation $\text{Normal}(\boldsymbol{\mu},\mathbf{S})$ to the posterior distribution for $\boldsymbol{\theta}$. Here, $\boldsymbol{\mu}$ is the mode of the log-posterior-density and $\mathbf{S}$ is the inverse of the negated Hessian (covariance matrix).
+
+```{r gaussian approximation}
+# Initialise gamma and theta parameters
+gamma_i <- rep(1, 4)
+theta_i <- rep(0, 4)
+
+# select the predictor and observed variables from the dataset `filament1.rda`
+x <- filament1$CAD_Weight
+y <- filament1$Actual_Weight
+
+# obtain the mode, hessian and covariance matrix
+posterior_mode <- posterior_mode(theta_i, x, y, gamma_i)
+
+mode <- posterior_mode$mode
+hessian <- posterior_mode$hessian
+covariance_matrix <- posterior_mode$S
+```
+
+\begin{align}
+  \boldsymbol{\mu} &= [-0.1008234,1.0800211,-2.9834581,-6.7584316] \\
+  \mathbf{S} = \text{covariance matrix} &=
+  \begin{bmatrix}
+    0.0082951754 & -0.0003431287 & 0.03033564 & -0.0042956177 \\
+    -0.0003431287 & 2.995519e-05 & -0.00149660 & 0.0002120789 \\
+    0.0303356429 & -0.0014966000 & 1.06644653 & -0.1239715050 \\
+    -0.0042956177 & 0.0002120789 & -0.12397151 & 0.0454331418 
+  \end{bmatrix}
+\end{align}
+
+## Importance sampling function
+The function `do_importance()` implements the Monte Carlo integration method using a multivariate Normal approximation $\text{Normal}(\boldsymbol{\mu},\mathbf{S})$ as the importance sampling distribution. For each sample, the log-importance weight is calculated by subtracting the log-density of the sample under the multivariate normal distribution from the log-posterior-density evaluated at the sample. These log weights are normalised to sum to 1.
+
+## Importance sampling
+
+Let us generate an importance sample of size 10,000 that is randomly generated following the multivariate Normal approximation as the importance sampling distribution. It has a mean of $\mu$, the mode of the log-posterior-density, and standard deviation given by the covariance matrix.
+
+``` {r Bayesian estimation}
+importance_sample <- do_importance(10000, mode, covariance_matrix, x, y, gamma_i)
+```
+
+```{r Bayesian Estimation 2, echo = FALSE}
+# Pivot the data for easier plotting
+importance_sample_pivot <- importance_sample %>%
+  pivot_longer(cols = starts_with("Beta"), 
+               names_to = "Parameter", 
+               values_to = "Value")
+
+ggplot(importance_sample_pivot, 
+                         aes(x = Value, 
+                             color = "red")) +
+  stat_ewcdf(aes(weights = exp(log_weights))) +
+  stat_ecdf(geom = "step", aes(color = "blue")) +
+  facet_wrap(~ Parameter, scales = "free") +
+  labs(title = "Empirical Weighted and Unweighted CDFs",
+       x = "Parameter Value", 
+       y = "Cumulative Probability", 
+       color = "Parameter") +
+  scale_color_manual(values = c("red" = "red", "blue" = "blue"), 
+                     labels = c("red" = "Weighted", "blue" = "Unweighted")) +
+  theme_minimal()
+```
+
+```{r Credible Intervals}
+# Compute credible intervals for each parameter
+credible_intervals <- importance_sample_pivot %>%
+  group_by(Parameter) %>%
+  summarise(credible_interval = list(make_CI(Value, exp(log_weights), 0.90))) %>%
+  unnest(cols = credible_interval)
+```
+
+
+```{r Credible Interval Table, echo = FALSE}
+knitr::kable(credible_intervals, caption = "Credible Intervals for Beta Parameters")
+```
+
+### $\beta_1$ and $\beta_2$ analysis
+The empirical CDF curve provides insights into the distribution of the sampled $\beta$-values.
+
+If we look at the graph for $\beta_1$ and $\beta_2$ values, we can see that the graphs follow a similar trend for both empirical weighted CDFs and unweighted CDFs. This means that the parameters are likely to be modeled correctly using the normal distribution. 
+
+The sharp jumps in the weighted cumulative frequency indicate a large cluster of points in these regions. This impacts the cumulative frequency graph by pulling it down in these regions.
+
+Observing the credible intervals in these ranges, we can see that the $\beta_1$ and $\beta_2$ parameters also match the intervals represented by the empirical CDF for a 90% credible interval. A credible interval represents the plausibility that a parameter takes certain values. The credible intervals for $\beta_1$ and $\beta_2$ are relatively narrow, indicating a higher degree of certainty in the estimates of these parameters. 
+
+The $\beta_1$ parameter represents the intercept of the model, while $\beta_2$ represents the coefficient of the CAD weight term; it represents the change in the actual weight for a one unit change in the CAD weight. As the $\beta_1$ credible interval contains 0, it may not have a significant effect on how the actual weight changes. This would mean that the relationship between the actual weight and CAD weight is such that the line passes through the origin on a graph. This suggests that the model is based solely on the linear and quadratic terms of $x_i$. 
+
+The $\beta_2$ parameter represents the coefficient of the linear term of the CAD weight. It represents the change in the actual weight for a one unit change of the CAD weight. The $\beta_2$ parameter is significant as it is non-zero. The $\beta_2$ parameter is close to 1 for a generated random sample. This indicates that the change in the CAD weight is directly proportional to the change in the actual weight. 
+As we have stated that $\beta_1$ is likely to be negligible, this indicates that the actual weight is modeled solely by $\beta_2$. If we consider this in relation to our data set, it implies that plotting actual weight against CAD weight will lead to a graph that closely follows $y=x$. Looking back to section 1, we can see that this matches the findings from the scatter plot. Our importance sample is generated from that data and thus expanding this to a larger sample size, we can see that the conclusions are still the same. This indicates that the CAD program is accurate in estimating how much material will be required to print the object.
+
+### $\beta_3$ and $\beta_4$ analysis
+
+If we look at the empirical CDF graph for the $\beta_3$ parameter, we can see that the graph is heavily skewed toward the beginning. The sharp initial jump indicates that there are many data points for the parameter values close to 0. It flattens out very quickly indicating that there are very few data points when the parameter value gets larger. This implies that the parameter value is likely to be close to 0. This is equal to the constant variance in the Normal distribution. Contextually, this is the amount of variation the actual weight will have for the CAD weight. The smaller the CAD weight, the more likely the $\beta_3$ parameter is to have an impact as the CAD weight term will be close to 0. This means that all the variation in the data would be explained by the $\beta_3$ parameter but as $x_i$ gets bigger, it becomes negligible.
+
+The $\beta_4$ parameter is the coefficient of the quadratic term $x_i^2$, the explanatory variable CAD weight. It represents the variance in actual weight for a one unit change in the CAD weight, assuming all other variables are held constant. This has a greater impact when $x_i$ becomes larger. This follows the modelling assumptions in section 2. If we consider it contextually, the printer operator reasons that random fluctuations in the material properties such as density and room temperature should lead to a relative error. This implies that if we are printing larger objects, the printer is being operated for longer which is likely to causes the machine to heat up leading to relative errors. The size of the object also increases the likelihood of error.
+
+The 5th and 95th percentiles on the empirical CDF graphs match the lower and upper credible intervals respectively. The credible intervals have a small width indicating that they have been estimated with a good level of precision and accurately model the sampled data. 
+
+As $\beta_3$ and $\beta_4$ have credible intervals that are close to 0, there is likely to be very little variation in the data. This matches the scatter plot in section 1, as the data points all lie very close to the line of best fit. This means that the relative errors are very unlikely to impact the fit of our model and cause the data to deviate.
+
+### Further Empirical CDF analysis
+
+```{r prediction intervals, echo = FALSE}
+ggplot(data = importance_sample_pivot, aes(x = Value, y = log_weights, fill = Parameter)) +
+  geom_point(size = 0.01, alpha = 0.4) +
+  facet_wrap( ~ importance_sample_pivot$Parameter, scales = "free") +
+  theme_minimal() +
+  labs(title = "The dependence of importance log-weights on sampled β values",
+       x = "β values",
+       y = "Log weights") +
+  theme(legend.position = "none")
+```
+
+The empirical CDF graphs represent the cumulative distribution of the data points. From the above graphs, we can see that the distribution of data points matches the empirical CDF graphs. For $\beta_1$, $\beta_2$ and $\beta_4$ have an S-shaped curve which implies that the points are evenly distributed which matches the analysis above and the log weights graphs. The $\beta_3$ graph is clustered around the beginning which also matches its ECDF albeit different to the other examples. This further supports that the modelling techniques used to sample the data have been accurate.
+
+### Summary
+
+From above, we have observed that $\beta_1$, $\beta_3$ and $\beta_4$ are negligible. This means that the 3D printer application is largely based on the $\beta_2$ parameter alone. This implies that the actual weight is modeled by the $\beta_2$ parameter multiplied by the CAD weight.
+
+In summary, the Bayesian model offers a probabilistic framework for parameter estimation, enabling the characterization of uncertainty in parameter estimates and predictions. For the 3D printer application, these results help in understanding the relationship between CAD weight and actual weight for a larger importance sample.
+
+# Code appendix
+
+```{r code=readLines("code.R"), eval=FALSE, echo=TRUE}
+# Do not change this code chunk
+```
