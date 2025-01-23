@@ -4,7 +4,7 @@ The files contained in this repository include the background work towards findi
 
 There is a second project focused on a gravesite in Gotland, in the field outside the walls of Visby, where a total of 493 femurs were found. The femurs consisted of 256 left femurs and 237 right femurs which means that at least 256 people must have been buried there but the aim was to work out how many people were actually buried there using statistical modelling.
 
-Methods implemented for statistical anlysis include, but are not limited to:
+Methods implemented for statistical anlaysis include, but are not limited to:
 - Confidence intervals
 - Bayesian estimation
 - Importance sampling
