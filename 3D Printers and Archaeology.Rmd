@@ -1,0 +1,280 @@
+---
+title: 'Project 2'
+author: "Nisha Depala (s2149899)"
+output:
+  html_document:
+    number_sections: yes
+  pdf_document:
+    number_sections: yes
+header-includes:
+  - \newcommand{\bm}[1]{\boldsymbol{#1}}
+  - \newcommand{\mat}[1]{\begin{bmatrix}#1\end{bmatrix}}
+---
+
+```{r setup, include = FALSE}
+# Modify this setup code chunk to set options
+# or add extra packages etc if needed.
+# See the project instructions for more details
+# on what code to show, and where/how.
+load("filament1.rda")
+
+# Set default code chunk options
+knitr::opts_chunk$set(
+  echo = TRUE,
+  eval = TRUE
+)
+
+suppressPackageStartupMessages(library(tidyverse))
+suppressPackageStartupMessages(library(gridExtra))
+theme_set(theme_bw())
+
+# To give the same random number sequence every time the document is knit:ed,
+# making it easier to discuss the specific numbers in the text:
+set.seed(12345L)
+```
+
+```{r code=readLines("code.R"), eval=TRUE, echo=FALSE, results='hide'}
+# Do not change this code chunk
+# Load function definitions
+source("code.R")
+```
+
+# 3D printer
+
+We consider two linear models, A and B, to capture the relationship between CAD weight $(x_i)$ and actual weight $(y_i)$. The models are defined as \[ \text{Model A: } y_i \sim \text{Normal}[\beta_1 + \beta_2x_i, exp(\beta_3+\beta_4x_i)] \text{ and Model B: } y_i \sim \text{Normal}[\beta_1 + \beta_2x_i, exp(\beta_3)+(\beta_4)x_i^2]\]
+
+## Probabilistic predictions
+
+```{r probabilistic predictions}
+A_fit <- filament1_estimate(filament1, "A")
+B_fit <- filament1_estimate(filament1, "B")
+
+pred_A <- filament1_predict(filament1, A_fit)
+pred_B <- filament1_predict(filament1, B_fit)
+
+pred_A$Actual_Weight <- filament1$Actual_Weight
+pred_B$Actual_Weight <- filament1$Actual_Weight
+
+CAD_Weight <- filament1$CAD_Weight
+```
+
+```{r, echo = FALSE}
+tableAB <- rbind(cbind(pred_A, CAD_Weight, Model = "A"),
+                cbind(pred_B, CAD_Weight, Model = "B"))
+
+ggplot(tableAB, mapping = aes(CAD_Weight)) +
+  geom_line(aes(y = mean, col = Model)) +
+  geom_ribbon(aes(ymin = lwr, ymax = upr, fill = Model), alpha = 0.25) +
+  geom_point(aes(y = Actual_Weight)) +
+  theme_minimal()+
+  xlab("CAD weight") +
+  ylab("Actual weight") +
+  labs(title = "Probabilistic predictions of 'Actual_Weight' using the
+two estimated models")
+```
+
+Looking at the graph, we can see that plotting `CAD_Weight` against `Actual_Weight` closely follows a linear relationship. This is expected as both of the models are linear; the points on the plot do not follow a perfectly linear relationship with some of the points deviating from the center. 
+
+As we have used a 5% level of significance to compute prediction intervals for both models, we can draw direct comparisons. The prediction intervals for both of the models are relatively narrow which indicates more confidence in the predictions for the actual weight of the objects being printed. Both of the ribbons also contain the vast majority of the objects indicating that it is a close fit and there is a good model performance.
+
+Model A has slightly wider prediction intervals than model B which indicates that the actual weight predictions from model B have a higher level of confidence in those predictions. 
+
+## Leave-one-out cross-validation (LOOCV)
+
+Let us complement this with quantitative data by looking at the squared error (ES) and Dawid-Sebastiani (DS) scores:
+
+```{r table of scores}
+scoreA <- leave1out(filament1, "A")
+scoreB <- leave1out(filament1, "B")
+```
+
+'''
+NB: The `leave1out()`function calculates the number of observations in the data set and then adds columns for the predictive mean and standard deviation to the set. It then iterates through each observation, known as the validation set, leaving one out at a time and fits the model on the remaining data, known as the training data. It predicts the outcome by using the function `filament1_predict()` which gives the predicted mean and standard deviation. It then calculates the ES and DS scores for each observation.
+
+LOOCV can help to reduce both bias and variance in machine learning models by providing an estimate of the model's performance on new data. 
+
+By training the model on all but one of the data points, LOOCV provides a more accurate estimate of the model's performance than traditional cross-validation methods.
+
+In addition, LOOCV can help to identify whether a model has high bias or high variance. If a model has high bias, LOOCV will typically result in similar performance on each iteration, as the model is not able to capture the true patterns in the data. 
+On the other hand, if a model has high variance, LOOCV will typically result in a wider range of performance on each iteration, as the model is highly sensitive to small fluctuations in the training data. By identifying whether a model has high bias or high variance, it is possible to adjust the model accordingly to improve its performance.
+'''
+
+```{r print table of scores, echo = FALSE}
+table <- rbind(cbind(scoreA, Model = "A"),
+               cbind(scoreB, Model = "B")) %>%
+  group_by(Model) %>%
+  summarise(se = mean(se),
+            ds = mean(ds))
+
+colnames(table) <- c("Model", "Squared Error", "Dawid-Sebastiani")
+knitr::kable(table, caption = "Errors for models A and B")
+```
+
+The ES calculates the average of the difference between the actual and predicted values. This is a particularly useful method in evaluating whether our models are good fits or not as it gives more weight to the large errors making them more pronounced, thus leading to a higher ES score. For both model A and model B, the ES score is the same to 3 s.f. which implies that the uncertainty in both of the models is similar. A score of $1.842$ (3 s.f.) is low in context with the range of `CAD_Weight` which indicates that the models are a good fit for `filament1.rda`. This supports the conclusions drawn from the graph above.
+
+The DS score measures the accuracy of probabilistic predictions by considering both the mean and the uncertainty of the predictions. It allows for a deeper understanding of how accurate the predicted actual weights calculated are. A lower score indicates that our predicted values are close to the mean (the line of best fit displayed on the graph) and the standard deviation is minimised. This means that whilst model A and model B have similar DS scores, model B is more accurate as a model for predicting the actual weights for the 3D printer. This also complements the comments made above from the visual interpretation of the graph.
+
+```{r plots of scores, echo = FALSE}
+tableAB <- rbind(cbind(scoreA, Model = "A"),
+               cbind(scoreB, Model = "B")) %>%
+  group_by(Model) %>%
+  select(Model, CAD_Weight, se, ds)
+
+# Plot of ES against CAD_Weight
+se_graph <- ggplot() +
+  geom_point(aes(CAD_Weight, se, colour = Model), data = tableAB) +
+  geom_smooth(aes(CAD_Weight, se, colour = Model), data = tableAB, method = "lm", se = FALSE, formula = y~ x, linewidth = 0.7) +
+  xlab("CAD Weight") +
+  ylab("Squared Error") +
+  theme_minimal() +
+  labs(title = "Leave1out cross validation for squared errors")+
+  ylim(-10, 25) 
+
+# Plot of DS against CAD_Weight
+ds_graph <- ggplot() +
+  geom_point(aes(CAD_Weight, ds, colour = Model), data = tableAB) +
+  geom_smooth(aes(CAD_Weight, ds, colour = Model), data = tableAB, method = "lm", se = FALSE, formula = y~ x, linewidth = 0.7) +
+  xlab("CAD Weight") +
+  ylab("Dawid-Sebastiani Error") +
+  labs(title = "Leave1out cross validation for Dawid-Sebastiani") +
+  theme_minimal() +
+  ylim(-10, 25) 
+
+grid.arrange(se_graph, ds_graph, ncol=1)
+```
+
+Each point on these plots represents the individual prediction for the CAD weight of the object printed by the 3D printer against its score. This allows for us to see how the score varies as the size of the object increases for each model. 
+
+For the squared error score, we can see that the predicted actual values for both objects closely mirror each other. This shows that there is a discrepancy between the lighter and heavier weights with the heavier weights deviating further from the line of best fit. This indicates that the model has a larger squared error score for larger objects. This, however, does make sense as the score has to be considered relatively and as the size of the object being printed is larger, the error must also grow proportionally.
+
+For the Dawid-Sebastiani score, we can see that the larger the weight of the object being printed, the errors are clustered around the line of best fit for model B; or model A, the points are spread further apart, so whilst they follow a similar linear relationship on average, the variation in the points indicates a lower level of certainty in the predicted actual weights. As both of the lines are stable, it appears that the model's accuracy is not significantly impacted by the size of the object being printed.
+
+## Monte Carlo estimate
+
+$H_0:$ The predictions from model A and model B are exchangeable.
+
+$H_1:$ The predictions from model B are better than the predictions from model A.
+
+
+```{r, echo = FALSE}
+# Extract scores for Model A and Model B separately
+score_A <- scoreA %>%
+  mutate(Model = "A") %>%
+  rename(se_A = se, ds_A = ds)
+
+score_B <- scoreB %>%
+  mutate(Model = "B") %>%
+  rename(se_B = se, ds_B = ds)
+
+# Combine scores for Model A and Model B
+score_AB <- cbind(score_A, score_B) %>%
+  select(se_A, ds_A, se_B, ds_B)
+```
+
+```{r P-values for different errors}
+# Calculate score difference between models A and B
+score_diff <- data.frame(se = score_AB$se_A - score_AB$se_B,
+                         ds = score_AB$ds_A - score_AB$ds_B)
+
+# Calculate mean score differences for the observed data
+statistic0 <- score_diff %>% summarise(se = mean(se), ds = mean(ds))
+
+# Number of iterations for Monte Carlo simulation
+J <- 10000
+
+statistic <- data.frame(se = numeric(J),
+                        ds = numeric(J))
+
+# Perform Monte Carlo simulation
+for (loop in seq_len(J)) {
+  # Generate random signs to add noise
+  random_sign <- sample(c(-1, 1), size = nrow(score_diff), replace = TRUE)
+  
+  # Compute simulated statistics using the random signs
+  statistic[loop, ] <- score_diff %>% summarise(se = mean(random_sign * se),
+                                                ds = mean(random_sign * ds))
+}
+
+# Calculate p-values for ES and DS
+p_values <- 
+  statistic %>%
+  summarise(se = mean(se > statistic0$se), 
+            ds = mean(ds > statistic0$ds))
+
+# Calculate Monte Carlo standard errors
+mc <- c(sqrt((p_values$se * (1 - p_values$se)) / J), 
+        sqrt((p_values$ds * (1 - p_values$ds)) / J))
+```
+
+This code is a procedure to assess the statistical significance of the differences between the two models using Monte Carlo simulation. The p-values obtained can help determine if the observed differences are statistically significant.
+
+```{r, echo=FALSE}
+# print table
+montecarlo_AB <- t(rbind(p_values, mc))
+
+rownames(montecarlo_AB) <- c("Squared Error", "Dawid-Sebastiani")
+colnames(montecarlo_AB) <- c("Monte Carlo estimate p-value", "Monte Carlo standard error")
+
+knitr::kable(montecarlo_AB, 
+             caption = "P-values for different errors")
+
+```
+
+We know that the Monte Carlo estimate p-value is accurate for both scores as the Monte Carlo standard error is low. This is expected as we have executed $10000$ iterations of the Monte Carlo simulation which generates a large dataset of DS and ES scores, so the estimated p-value is likely to be close to the true p-value. Let us look at the p-value for each score now.
+
+The Monte Carlo Estimate p-value for the squared error is $0.4989$, which indicates that there is insufficient evidence to reject the null hypothesis of model A or model B being exchangeable. Both models seem to perform the same way in terms of prediction accuracy in terms of its squared error.
+
+For the DS score, the p-value is $0.0436$. This suggests that there may be a trend towards model B performing better than model A and further tests should be conducted as the evidence is strong enough to reject the null hypothesis of exchangeability at the 5% significance level. This matches our earlier findings as model B appears to closely follow a linear relationship in terms of its DS score, whereas model A does not.
+
+# Archaeology in the Baltic sea
+
+At the gravesite in Gotland, in the field outside the walls of Visby, a total of 493 femurs were found. The femurs consisted of 256 left femurs and 237 right femurs which means that at least 256 people must have been buried there. 
+
+To try and see how many people were actually buried there, we can build a simple model which takes a vector $y$, of independent observations from a $\text{Bin}(N, \phi)$ distribution. Here, $N$ is the total number of people buried and $\phi$ is the probability of finding a left or right femur. Both of these values are unknown.
+
+The probability function for a single observation $y \sim \text{Bin}(N,\phi)$ is $$p(y \mid N, \phi) = {N \choose y} \phi^y(1-\phi)^{N-y}.$$ 
+
+The combined log-likelihood $\ell(y_1,y_2 \mid N, \phi) = \log p(y_1, y_2 \mid N, \phi)$ for the data set $\{y_1,y_2\}$ is then given by 
+
+\begin{align*}
+\ell(y_1,y_2 \mid N, \phi) = &-\log\Gamma(y_1+1)-\log\Gamma(y_2+1) \\
+&-\log\Gamma(N-y_1+1)-\log\Gamma(N-y_2+1)+2\log\Gamma(N+1) \\
+&+ (y_1+y_2)\log(\phi)+(2N-y_1-y_2)\log(1-\phi)
+\end{align*}
+
+Before the excavation took place, the archaeologist believed that around 1000 individuals were buried, and that
+they would find around half on the femurs. To encode that belief in the Bayesian analysis, we set $\xi = 1/(1+ 1000)$, which corresponds to an expected total count of 1000, and $a = b = 1/2$, which makes $\phi$ more likely to be close to $1/2$ than to $0$ or $1$.
+
+Monte Carlo integration can be used to estimate the posterior expectations of $N$ and $\phi$. Consider prior distributions $N \sim \text{Geom}(\xi), \quad0<\xi<1,$ and $\phi \sim \text{Beta}(a,b),\quad a,b>0$. We consider the prior distributions as sampling distributions for the Monte Carlo integrations, such that samples $n^{[k]}\sim \text{Geom}(\xi)$ and $\phi^{[k]}\sim \text{Beta}(a,b)$, can be used to compute Monte Carlo estimates:
+
+```{r monte carlo archaeology}
+y = c(237, 256)
+xi = 1/1001
+a = 1/2
+b = 1/2
+K = 10000
+
+estimates <- as.data.frame(estimate(y, xi, a, b, K))
+```
+
+```{r, echo =FALSE}
+colnames(estimates) <- c("$\\widehat p_{\\mathbf{y}}(\\mathbf{y})$", "$\\widehat E (N \\mid \\mathbf{y})$", "$\\widehat E (\\phi \\mid \\mathbf{y})$")
+
+rownames(estimates) <- c("Monte Carlo estimates")
+
+knitr::kable(estimates)
+```
+
+The marginal likelihood estimate represents the probability of observing the data under the model. As we are looking at Bayesian Inference, it serves as a scaling factor for the posterior distribution. The value of $7.4e-0.6$ is very very small which makes us think that the observed data is unlikely under the assumed model. This makes sense as scientists were expecting to find $2000$ femurs, which corresponds to $1000$ people and if there was an excavation at the site, there should have been way more bones found if this was accurate. This implies that the model is a poor fit for the data.
+
+The first posterior expectation represents the average value of the total number of people buried given the observed data. This number is very close to $1000$ which means that according to the model, around $981$ people were buried here.
+
+The second posterior expectation represents the average probability of finding a left or right femur. This implies that there is approximately a $37.4\%$ chance of finding a femur.
+
+This model does not appear to be a good fit but this could be due to a variety of reasons. The record keeping during the battle was poor and so the number of people calculated would not necessarily be accurate. If the model is based off this, then it makes sense that whilst the posterior expectations match up, it wouldn't necessarily be a good fit as the marginal likelihood is very very small. It is important to consider the uncertainty associated with these estimates, for example by calculating credible intervals to gain a more valuable understanding of the dataset.
+
+# Code appendix
+
+```{r code=readLines("code.R"), eval=FALSE, echo=TRUE}
+# Do not change this code chunk
+```
